@@ -1,0 +1,47 @@
+.App {
+  font-family: "Poppins", sans-serif;
+  text-align: center;
+  padding: 2rem;
+  background: #fafafa;
+  min-height: 100vh;
+}
+
+input[type="file"] {
+  margin: 1rem;
+}
+
+button {
+  background-color: #007bff;
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.result {
+  margin-top: 2rem;
+  background: white;
+  border-radius: 10px;
+  padding: 1rem 2rem;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  text-align: left;
+}
+
+.colors {
+  display: flex;
+  margin: 1rem 0;
+}
+
+.color-box {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  margin-right: 10px;
+  border: 1px solid #ccc;
+}

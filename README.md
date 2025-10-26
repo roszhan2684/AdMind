@@ -1,204 +1,328 @@
-AdMind — Ad Creative Intelligence Pipeline
+# AdMind — Creative Intelligence for Ads
 
-AdMind is an end-to-end system that analyzes ad creatives (images and videos) and extracts high-value, minimally overlapping signals for ranking and recommendation systems. It is designed for speed, robustness, and batchability, with optional LLM insights to turn raw features into concise creative guidance.
+Cal Hacks 12.0 Submission • AppLovin Ad Intelligence Challenge
 
-Highlights
+AdMind is an end-to-end system that analyzes ad creatives (images and videos) and turns pixels, motion, and text into structured features and a concise AI insight that can feed a recommendation engine. It combines a Python ML engine for fast, parallelizable signal extraction with a Node/Express gateway and a lightweight React UI.
 
-Multimodal feature extraction for images and videos:
+---
 
-Dominant emotion, face stats, zero-shot object categories
+## Why AdMind
 
-OCR text and brand heuristics
+Modern advertisers need to know *why* a creative will work before spending on distribution. AdMind extracts distinct, minimally overlapping signals—for tone, composition, content, motion, and copy—then synthesizes them into an actionable summary using Gemini. These signals are designed to be joined with campaign and user context to improve a ranking model like AppLovin’s Axon.
 
-Layout balance and saliency heatmaps
+---
 
-Color palettes
+## Core Signals (Images & Video)
 
-Video-specific: per-second emotion timeline, keyframes, motion-robust face crops
+* **Emotion / Tone**
 
-Embeddings: CLIP-style visual alignment and caption alignment score
+  * Images: FER-based dominant emotion (+ confidence, face count).
+  * Video: per-second emotion timeline, smoothed with EMA; final dominant emotion; average faces/second.
 
-NSFW screening (optional)
+* **Composition**
 
-LLM Insight (Gemini): Structured JSON insight summarizing tone, weakness, and 3 concrete suggestions. Includes a deterministic heuristic fallback so an insight is always present.
+  * Layout balance, negative space heuristics, saliency heatmaps, global color palette.
 
-Three components:
+* **Objects & Semantics**
 
-ML Engine (Python/Flask) — model inference for images and video.
+  * YOLO object detections; CLIP zero-shot categories; best caption alignment score.
 
-Backend API (Node/Express) — file upload, orchestration, Gemini enrichment.
+* **Copy & Brand Cues**
 
-Web UI (React) — upload, preview, rich result viewer.
+  * OCR text excerpt; brand name heuristics from text (with confidence/evidence).
 
-Batch runner to process a ZIP or folder and export features.csv and features.jsonl.
+* **NSFW & Safety**
 
-Parallelizable and fast: designed to run under five minutes on the provided dataset with 4 workers on a modern laptop.
+  * Optional classifier for safe/unsafe summaries (graceful degradation if unavailable).
 
-Repository Layout
-AdMind/
-├─ AdMindStack/
-│  ├─ MLEngine/                # Python models + Flask server (port 5001)
-│  │  ├─ main.py
-│  │  ├─ utils/                # heatmap, preprocessing, feature extraction, zero-shot
-│  │  ├─ venv/                 # local virtualenv (excluded from git)
-│  ├─ backend/                 # Node/Express API (port 5050)
-│  │  ├─ server.js
-│  │  └─ routes/analyze.js
-│  ├─ frontend/                # React app (port 3000)
-│  │  ├─ src/App.js
-│  │  └─ App.css
-│  ├─ tools/                   # CLI + batch processing scripts
-│  │  └─ batch_run.py
-│  ├─ dataset/                 # ads.zip and sample media (excluded or small subset)
-│  └─ outputs/                 # generated features (CSV/JSONL/heatmaps)
-└─ README.md
+* **Video-specific**
 
-Setup
-0) System Requirements
+  * Duration, frames analyzed, fps sample, keyframe heatmaps, top objects and OCR across time.
 
-macOS or Linux
+* **Creative Score**
 
-Python 3.10–3.11
+  * Lightweight, interpretable score combining composition, text, object presence, brand cues, and safety.
 
-Node.js 18+ and npm
+* **Gemini Insight (Strict JSON)**
 
-Optional: FFmpeg for robust video codecs
+  * A 1–2 sentence summary, one weakness, and 3–5 suggestions; always present via robust fallbacks.
 
-1) Python ML Engine
-cd AdMind/AdMindStack/MLEngine
+---
 
-# Use a fresh virtualenv
-python3 -m venv venv
-source venv/bin/activate
+## System Architecture
 
-# Install runtime deps
-pip install --upgrade pip wheel
-pip install -r requirements.txt  # if present
-# Or, minimally:
-pip install flask flask-cors easyocr ultralytics sentence-transformers fer pillow requests python-dotenv
+```
+[React Frontend]  ──►  [Node/Express Gateway :5050]
+                          └─ uploads/, serves /outputs, calls Gemini SDK
+                                 │
+                                 ▼
+                      [Python Flask ML Engine :5001]
+                      OCR • YOLO • CLIP • FER • NSFW • Heatmaps
+                                 │
+                                 ▼
+                         features + insight JSON
+```
 
-# First run will auto-download YOLO weights, etc.
-python main.py  # serves on http://127.0.0.1:5001
+* The ML engine does all heavy lifting and returns structured features.
+* The Node backend enriches results with a Gemini insight (using `@google/genai`) and serves static outputs (heatmaps).
+* The UI uploads a single file and renders everything, or you can batch a whole ZIP via a CLI tool.
 
+---
 
-Environment variables (optional) for ML Engine:
+## Quick Start
 
-# .env (ML Engine)
-GEMINI_API_KEY=<your-key>         # optional; ML can run without it
-GEMINI_MODEL=gemini-1.5-flash     # or gemini-2.5-flash if supported by your key
+### 1) Clone
 
-2) Backend API
-cd AdMind/AdMindStack/backend
-npm install
+```bash
+git clone <your-repo-url>
+cd AdMindStack
+```
 
-# .env for backend
-cat > .env <<'EOF'
-GEMINI_API_KEY=<your-key>         # optional; if omitted a heuristic insight is used
-GEMINI_MODEL=gemini-2.5-flash     # prefer stable models; project falls back automatically
+### 2) Environment
+
+Create `backend/.env`:
+
+```env
+GEMINI_API_KEY=YOUR_KEY_HERE
+GEMINI_MODEL=gemini-2.5-flash
 ML_BASE=http://127.0.0.1:5001
 MAX_UPLOAD_MB=200
-EOF
+```
 
-node server.js    # http://127.0.0.1:5050
+### 3) Start the ML Engine (Python, port 5001)
 
+From `AdMindStack/MLEngine/`:
 
-Health checks:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt  # see “Python requirements” below
+python main.py
+```
 
-curl http://127.0.0.1:5050/ping
-curl http://127.0.0.1:5050/api/limits
-curl http://127.0.0.1:5050/api/gemini/health
+### 4) Start the Gateway (Node, port 5050)
 
-3) Frontend UI
-cd AdMind/AdMindStack/frontend
+From `AdMindStack/backend/`:
+
+```bash
 npm install
-npm start        # http://localhost:3000
+node server.js
+```
 
+### 5) Start the Frontend
 
-The UI lets you upload an image or video and renders the full analysis with heatmaps and Gemini insight.
+If you used the provided React app:
 
-Batch Processing
+```bash
+cd AdMindStack/frontend
+npm install
+npm start   # or: npm run dev
+```
 
-Process an entire ZIP or folder and export CSV/JSONL:
+Open the app and upload an image/video. Heatmaps are served from `/outputs`, and Gemini Insight appears under the analysis block.
 
-cd AdMind/AdMindStack/MLEngine/tools
-source ../venv/bin/activate
+---
 
-# Use Python ML directly:
-python batch_run.py \
-  --ml http://127.0.0.1:5001 \
-  --zip /path/to/ads.zip \
-  --out /path/to/outputs \
-  --max-workers 4 \
-  --timeout 600
+## Batch Processing (ZIP or Folder)
 
-# Or route through the backend (adds Gemini insight):
-python batch_run.py \
+From `AdMindStack/tools/`:
+
+```bash
+python3 batch_run.py \
   --use-backend \
   --backend http://127.0.0.1:5050/api \
   --zip /path/to/ads.zip \
   --out /path/to/outputs \
   --max-workers 4 \
   --timeout 600
+```
 
+Outputs:
 
-Artifacts:
+* `features.csv` — wide table for quick inspection.
+* `features.jsonl` — one JSON per creative (full raw payloads).
+* `timing.json` — summary stats.
 
-outputs/features.csv — flat, analysis-ready rows per creative
+---
 
-outputs/features.jsonl — full raw JSON per creative
+## API Endpoints
 
-outputs/timing.json — simple throughput summary
+### POST `/api/upload`
 
-Extracted Signals
+Form-data: `file=<image|video>`
 
-Core image features:
+* Routes to `ML_BASE/analyze` (images) or `ML_BASE/analyze_video` (videos).
+* Enriches response with `insight` (Gemini strict JSON).
+* Returns JSON including: composition, objects, OCR, brands, NSFW, creative_score, heatmap paths, and `insight`.
 
-dominant_emotion, emotion_confidence, face_count
+### GET `/api/gemini/health`
 
-text_content (OCR), ocr_text_len
+Pings Gemini with a lightweight prompt and returns `{ ok, model, reply | error }`.
 
-detected_objects (YOLO)
+### ML Engine
 
-top_categories (zero-shot CLIP labels)
+* `GET /health` — engine status and flags.
+* `POST /analyze` — image analysis.
+* `POST /analyze_video` — video analysis.
 
-layout_balance (symmetry/space heuristic)
+---
 
-color_palette (dominant colors)
+## Frontend Notes
 
-alignment.best_caption.score (CLIP image–text alignment)
+* The UI displays:
 
-brands (OCR heuristic)
+  * Dominant emotion (and confidence), faces, layout balance, palette.
+  * OCR text, detected objects, top categories, brands, NSFW.
+  * Best caption and score; creative score; heatmap preview.
+  * For videos: duration, frames analyzed, fps, per-second emotions, top objects, OCR excerpt, keyframe heatmaps.
+  * **Gemini Insight** for both image and video via an `InsightBlock` that parses strict JSON or fenced JSON codeblocks.
 
-nsfw summary
+---
 
-creative_score (interpretable composite score)
+## File/Folder Structure (high-level)
 
-heatmap_url (saliency visualization)
+```
+AdMindStack/
+├─ MLEngine/
+│  ├─ main.py
+│  ├─ utils/
+│  │  ├─ heatmap.py
+│  │  ├─ image_preprocessing.py
+│  │  ├─ feature_extraction.py
+│  │  └─ zero_shot.py
+│  └─ requirements.txt
+├─ backend/
+│  ├─ server.js
+│  ├─ routes/
+│  │  └─ analyze.js
+│  └─ .env
+├─ frontend/
+│  └─ src/App.js
+└─ tools/
+   └─ batch_run.py
+```
 
-Core video features:
+---
 
-video_emotions.per_second and video_emotions.summary.final_top
+## Tech Stack
 
-avg_faces_per_sec, top_emotions counts
+**ML Engine (Python)**
 
-objects_top, ocr_excerpt, color_palette_global
+* Flask, Flask-CORS
+* OpenCV, NumPy, PIL/Pillow
+* EasyOCR
+* Ultralytics YOLO
+* Sentence-Transformers (CLIP)
+* FER (facial emotion)
+* Transformers (optional NSFW)
+* Requests, python-dotenv
 
-layout_balance_avg, keyframe_heatmaps
+**Gateway (Node)**
 
-nsfw temporal sampling
+* Express, Multer
+* Axios, Form-Data
+* `@google/genai` (Gemini SDK)
+* dotenv
 
-creative_score (video version)
+**Frontend**
 
-LLM Insight:
+* React
+* Axios
+* Minimal CSS
 
-Always present via Gemini or heuristic fallback.
+---
 
-Flat JSON fields:
+## Why These Signals Help a Recommender
 
-insight.emotion
+* **Emotion trajectory (video)**: correlates with early attention and retention; smoother or rising valence often performs better.
+* **Layout balance & saliency**: predict glanceability and CTA legibility on small screens.
+* **OCR and brand cues**: capture clarity of message and brand reinforcement without training a custom OCR stack.
+* **Object categories & zero-shot labels**: enable creative clustering, retrieval, and negative keywords for exploration/exploitation.
+* **NSFW safety**: essential gating signal for inventory suitability.
+* **Creative Score**: a transparent, tunable baseline to prioritize variants when labels are unavailable.
 
-insight.insight_summary
+---
 
-insight.weakness (when using backend’s current controller)
+## Performance & Robustness
 
-insight.suggestions (array)
+* Designed to run under five minutes for the provided dataset via:
+
+  * Lightweight models (YOLO-n, CLIP B/32).
+  * Video sampling at ~1 fps for auxiliary analysis.
+  * Thread-pool batch runner with retries.
+* All calls have sensible timeouts and degrade gracefully:
+
+  * If Gemini is unavailable, a fallback heuristic always returns a valid “insight” JSON.
+  * If NSFW is unavailable, the system defaults to safe and continues.
+
+---
+
+## Troubleshooting
+
+**“connect ECONNREFUSED 127.0.0.1:5001”**
+The ML engine isn’t running or is on a different port. Start `python main.py` and confirm:
+
+```bash
+curl http://127.0.0.1:5001/health
+```
+
+**“Parse Error: Expected HTTP/” when calling ML**
+Something else is bound to port 5001 (non-HTTP service). Find and stop it:
+
+```bash
+lsof -i :5001
+kill -9 <PID>
+```
+
+Then restart the ML engine.
+
+**Hugging Face timeouts on first run**
+Model weights download on first launch. Ensure stable internet, or pre-cache models. You can also retry; the hub has built-in exponential backoff.
+
+**OpenCV “Could not open video”**
+The file may be corrupted or an unsupported codec. Re-encode with ffmpeg:
+
+```bash
+ffmpeg -i input.mp4 -c:v libx264 -c:a aac -movflags +faststart fixed.mp4
+```
+
+**Gemini insight missing**
+Verify `GEMINI_API_KEY` and internet access:
+
+```bash
+curl http://127.0.0.1:5050/api/gemini/health
+```
+
+If the SDK complains about safety categories, the backend already uses safe enums; upgrade `@google/genai` and keep the provided `analyze.js`.
+
+---
+
+## Security & Privacy
+
+* API keys are read from environment variables and never committed.
+* Uploaded files are stored temporarily and deleted after processing on the backend; heatmaps are served from `/outputs` only.
+* No user data beyond the upload is retained by default.
+
+---
+
+## What’s Next
+
+* Train a lightweight meta-model to predict CTR/retention using these features.
+* Add audio sentiment and speech-to-text alignment.
+* Platform-specific recommendations (TikTok vs. Instagram vs. YouTube).
+* Creative search and clustering for creative strategy and coverage analysis.
+* Simple API for bulk ingestion and CI/CD integration.
+
+---
+
+## License
+
+MIT. See `LICENSE`.
+
+---
+
+## Acknowledgements
+
+* Open-source models: Ultralytics, Sentence-Transformers, EasyOCR, FER.
+* Google Gemini for generative insights and summarization.
+* Thanks to the Cal Hacks and AppLovin teams for the challenge and resources.
